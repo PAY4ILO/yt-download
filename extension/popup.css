@@ -31,6 +31,11 @@ body { width: 380px; background: #fff; }
 .settings .v { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg2); }
 .settings .v.dir { direction: rtl; text-align: left; }
 .settings .link { margin: 0; font-size: 12px; flex: none; }
+.settings .sel.mini { flex: 1; height: 26px; padding: 0 4px; font-size: 12px; direction: ltr; color: var(--fg); }
+.settings #keys { font-variant-numeric: tabular-nums; color: var(--fg2) !important; font-weight: 400; }
+.settings #keys:hover { color: var(--accent) !important; }
+#list:empty { display: none; }
+#list ~ .list { border-top: 1px solid var(--line); margin-top: 8px; }
 .settings .link.hot {
   color: var(--accent-fg) !important; background: var(--accent); border-radius: 12px; padding: 3px 10px;
 }

@@ -9,6 +9,7 @@
 <body>
   <div class="ytd" id="app">
     <section id="video"></section>
+    <section id="list"></section>
 
     <section id="novideo" hidden>
       <div class="hero">
@@ -29,6 +30,20 @@
     </section>
 
     <section class="settings">
+      <div class="row">
+        <span class="k">Кнопка</span>
+        <select class="v sel mini" id="quick" title="Что делает клик по кнопке «Скачать» под видео и Alt+Shift+D">
+          <option value="">открывает выбор качества</option>
+          <option value="v2160">сразу качает до 4K</option>
+          <option value="v1440">сразу качает до 1440p</option>
+          <option value="v1080">сразу качает до 1080p</option>
+          <option value="v720">сразу качает до 720p</option>
+          <option value="v480">сразу качает до 480p</option>
+          <option value="mp3">сразу качает MP3</option>
+          <option value="m4a">сразу качает M4A</option>
+        </select>
+        <button class="link" id="keys" title="Поменять горячую клавишу">Alt+Shift+D</button>
+      </div>
       <div class="row">
         <span class="k">Папка</span>
         <span class="v dir" id="dir"></span>

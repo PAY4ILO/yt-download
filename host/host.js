@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const CONFIG = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8').replace(/^﻿/, ''));
 const LOG = path.join(__dirname, 'host.log');
 const ROOT = path.dirname(__dirname); // the yt-download folder: extension/, host/, install.ps1
@@ -195,10 +195,33 @@ function formatArgs(o) {
   return ['-f', 'bv*+ba/b', '-S', `res:${h},fps,vcodec:h264,acodec:aac`, '--merge-output-format', 'mp4', '--embed-metadata', '--embed-chapters'];
 }
 
+// Windows-safe file/folder name
+function safeName(s, max = 150) {
+  return String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim()
+    .slice(0, max).replace(/[. ]+$/, '');
+}
+
+// target folder: chosen dir, plus a playlist subfolder for playlist downloads
+function jobDir(msg) {
+  const dir = path.join(msg.dir || CONFIG.defaultDir, safeName(msg.subdir, 100));
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+
+// "01. " in front of playlist items keeps their order in Explorer
+function indexPrefix(msg) {
+  return msg.index ? String(msg.index).padStart(String(msg.count || 99).length < 2 ? 2 : String(msg.count).length, '0') + '. ' : '';
+}
+
+function dispatchDownload(msg) {
+  if (msg.kind === 'thumb') return downloadThumb(msg);
+  if (msg.section) return downloadFragment(msg, false);
+  return startDownload(msg, false);
+}
+
 function startDownload(msg, withCookies) {
   const id = msg.id;
-  const dir = msg.dir || CONFIG.defaultDir;
-  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const dir = jobDir(msg);
   const args = ytdlpArgs([
     ...formatArgs(msg),
     ...(withCookies ? cookieArgs() : []),
@@ -209,7 +232,7 @@ function startDownload(msg, withCookies) {
     '--progress-template', 'postprocess:@@PP%(progress.postprocessor)s|%(progress.status)s',
     '-P', dir,
     // quality in the name: 720p and 1080p of one video can download side by side
-    '-o', msg.kind === 'video' ? '%(title).170B (%(height)sp) [%(id)s].%(ext)s' : '%(title).180B [%(id)s].%(ext)s',
+    '-o', indexPrefix(msg) + (msg.kind === 'video' ? '%(title).170B (%(height)sp) [%(id)s].%(ext)s' : '%(title).180B [%(id)s].%(ext)s'),
     msg.url,
   ]);
 
@@ -271,6 +294,198 @@ function overall(st) {
   }
   const phase = st.nParts > 1 ? (idx <= 1 ? 'Скачиваю видео' : 'Скачиваю звук') : 'Скачиваю';
   return { percent: Math.max(0, Math.min(99.5, percent)), phase, done, total: st.total };
+}
+
+// ---------- fragment / GIF ----------
+// yt-dlp --download-sections streams through ffmpeg, which YouTube throttles to a crawl.
+// Instead: ask yt-dlp only for the stream URLs, pull the needed byte span (fragment.js),
+// then cut precisely with ffmpeg.
+
+const { downloadSection } = require('./fragment');
+
+function ffmpegExe(name = 'ffmpeg') {
+  return CONFIG.ffmpeg ? path.join(CONFIG.ffmpeg, name + '.exe') : name;
+}
+
+function clock(sec) {
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return (h ? h + 'h' + String(m).padStart(2, '0') + 'm' : m + 'm') + String(s).padStart(2, '0') + 's';
+}
+
+// Only DASH mp4 (protocol https) has the sidx index fragment.js needs; some YouTube formats
+// with ext=mp4 are HLS (m3u8) and must be skipped.
+function sectionFormat(msg) {
+  const dash = '[ext=mp4][protocol=https]';
+  if (msg.kind === 'gif') return ['-f', `bv*${dash}`, '-S', 'res:480,fps,vcodec:h264'];
+  if (msg.kind === 'mp3' || msg.kind === 'm4a') return ['-f', 'ba[ext=m4a][protocol=https]', '-S', 'abr'];
+  const h = Number(msg.height) || 1080;
+  return ['-f', `bv*${dash}+ba[ext=m4a][protocol=https]`, '-S', `res:${h},fps,vcodec:h264,acodec:aac`];
+}
+
+function runFfmpeg(job, args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegExe(), ['-y', '-hide_banner', '-loglevel', 'error', ...args], { windowsHide: true });
+    job.proc = proc;
+    let err = '';
+    proc.stderr.on('data', (d) => { err += d.toString('utf8'); });
+    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(err.trim().split(/\r?\n/).pop() || 'ffmpeg: ошибка ' + code))));
+    proc.on('error', reject);
+  });
+}
+
+async function downloadFragment(msg, withCookies) {
+  const id = msg.id;
+  const st = { cancelled: false };
+  const abort = new AbortController();
+  const job = { id, proc: null, st, msg, abort };
+  jobs.set(id, job);
+  const start = Math.max(0, Number(msg.section.start) || 0);
+  const end = Number(msg.section.end);
+  const dur = end - start;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ytd-frag-'));
+  try {
+    if (!(dur > 0)) throw new Error('Конец фрагмента должен быть позже начала.');
+    send({ id, ev: 'progress', phase: 'Подключаюсь к YouTube', percent: 0 });
+    const r = await run(ytdlpArgs([...sectionFormat(msg), ...(withCookies ? cookieArgs() : []), '-J', msg.url]), { timeoutMs: 90000 });
+    if (st.cancelled) throw new Error('cancelled');
+    if (r.code !== 0) {
+      if (!withCookies && needsCookies(r.err) && CONFIG.firefoxProfile) {
+        jobs.delete(id);
+        fs.rmSync(tmp, { recursive: true, force: true });
+        return downloadFragment(msg, true);
+      }
+      if (/Requested format is not available/i.test(r.err)) throw new Error('У этого видео фрагмент вырезать нельзя (нет подходящего формата). Скачай целиком.');
+      throw new Error(cleanError(r.err));
+    }
+    const info = JSON.parse(r.out);
+    const fmts = info.requested_formats || [info];
+
+    // download the byte spans, one stream after another
+    const parts = [];
+    const totals = new Array(fmts.length).fill(0), dones = new Array(fmts.length).fill(0);
+    const t0 = Date.now();
+    let lastSent = 0;
+    for (let i = 0; i < fmts.length; i++) {
+      const file = path.join(tmp, `part${i}.mp4`);
+      const res = await downloadSection(fmts[i], start, end, file, {
+        signal: abort.signal,
+        onBytes(done, total) {
+          dones[i] = done; totals[i] = total;
+          const now = Date.now();
+          if (now - lastSent < 250) return;
+          lastSent = now;
+          // later streams' sizes aren't known yet: each stream is an equal share of the bar
+          const pct = (i + done / total) / fmts.length * 100;
+          const d = dones.reduce((a, b) => a + b, 0);
+          send({ id, ev: 'progress', phase: 'Скачиваю фрагмент', percent: Math.min(95, pct), speed: d / ((now - t0) / 1000) });
+        },
+      });
+      parts.push({ file, offset: res.offset, fmt: fmts[i] });
+    }
+    if (st.cancelled) throw new Error('cancelled');
+
+    const dir = jobDir(msg);
+    const title = safeName(info.title || msg.title || info.id);
+    const range = clock(start) + '-' + clock(end);
+    let out, args;
+    if (msg.kind === 'gif') {
+      out = path.join(dir, `${title} (GIF, ${range}) [${info.id}].gif`);
+      send({ id, ev: 'progress', phase: 'Делаю GIF', percent: 100, busy: true });
+      args = ['-ss', parts[0].offset.toFixed(3), '-i', parts[0].file, '-t', dur.toFixed(3),
+        '-vf', 'fps=15,scale=480:-2:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
+        '-loop', '0', out];
+    } else if (msg.kind === 'mp3' || msg.kind === 'm4a') {
+      out = path.join(dir, `${title} (${range}) [${info.id}].${msg.kind}`);
+      send({ id, ev: 'progress', phase: 'Вырезаю фрагмент', percent: 100, busy: true });
+      args = ['-ss', parts[0].offset.toFixed(3), '-i', parts[0].file, '-t', dur.toFixed(3), '-vn',
+        ...(msg.kind === 'mp3' ? ['-c:a', 'libmp3lame', '-q:a', '0'] : ['-c:a', 'aac', '-b:a', '192k']),
+        '-metadata', `title=${info.title || ''}`, '-metadata', `artist=${info.channel || info.uploader || ''}`, out];
+    } else {
+      const v = parts.find((p) => p.fmt.vcodec && p.fmt.vcodec !== 'none') || parts[0];
+      const a = parts.find((p) => p !== v);
+      out = path.join(dir, `${title} (${v.fmt.height || ''}p, ${range}) [${info.id}].mp4`);
+      send({ id, ev: 'progress', phase: 'Вырезаю фрагмент', percent: 100, busy: true });
+      // re-encode: the cut lands exactly on the requested second, not on the previous keyframe
+      args = ['-ss', v.offset.toFixed(3), '-i', v.file];
+      if (a) args.push('-ss', a.offset.toFixed(3), '-i', a.file);
+      args.push('-t', dur.toFixed(3), '-map', '0:v:0');
+      if (a) args.push('-map', '1:a:0');
+      args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p');
+      if (a) args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
+      args.push('-movflags', '+faststart', '-metadata', `title=${info.title || ''}`, out);
+    }
+    await runFfmpeg(job, args);
+    if (st.cancelled) { try { fs.unlinkSync(out); } catch {} throw new Error('cancelled'); }
+    send({ id, ev: 'done', file: out });
+  } catch (e) {
+    if (st.cancelled || e.name === 'AbortError') send({ id, ev: 'cancelled' });
+    else { log('fragment failed', id, e.stack || e); send({ id, ev: 'error', message: e.message }); }
+  } finally {
+    jobs.delete(id);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ---------- cover ----------
+
+async function downloadThumb(msg) {
+  const id = msg.id;
+  const job = { id, proc: null, st: { cancelled: false }, msg, abort: new AbortController() };
+  jobs.set(id, job);
+  try {
+    send({ id, ev: 'progress', phase: 'Скачиваю обложку', percent: 0, busy: true });
+    let buf = null;
+    // maxres (1280x720 or more) exists for most HD videos; fall back down the list
+    for (const name of ['maxresdefault', 'sddefault', 'hqdefault']) {
+      const res = await fetch(`https://i.ytimg.com/vi/${msg.videoId}/${name}.jpg`, { signal: job.abort.signal });
+      if (res.ok) { buf = Buffer.from(await res.arrayBuffer()); break; }
+    }
+    if (!buf) throw new Error('У видео нет обложки.');
+    const out = path.join(jobDir(msg), `${indexPrefix(msg)}${safeName(msg.title || msg.videoId)} [${msg.videoId}].jpg`);
+    fs.writeFileSync(out, buf);
+    send({ id, ev: 'done', file: out });
+  } catch (e) {
+    if (job.st.cancelled || e.name === 'AbortError') send({ id, ev: 'cancelled' });
+    else send({ id, ev: 'error', message: e.message });
+  } finally {
+    jobs.delete(id);
+  }
+}
+
+// ---------- playlists / channels ----------
+
+function listUrl(url) {
+  const u = new URL(url);
+  const list = u.searchParams.get('list');
+  if (list && u.pathname !== '/playlist') return 'https://www.youtube.com/playlist?list=' + list;
+  // a channel page without a tab: take its uploads
+  if (/^\/(@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)\/?$/.test(u.pathname)) return u.origin + u.pathname.replace(/\/$/, '') + '/videos';
+  return url;
+}
+
+async function probeList(url) {
+  const target = listUrl(url);
+  let r = await run(ytdlpArgs(['--flat-playlist', '-J', '-I', '1:500', target]).filter((a) => a !== '--no-playlist'), { timeoutMs: 120000 });
+  if (r.code !== 0 && needsCookies(r.err) && CONFIG.firefoxProfile) {
+    r = await run(ytdlpArgs(['--flat-playlist', '-J', '-I', '1:500', ...cookieArgs(), target]).filter((a) => a !== '--no-playlist'), { timeoutMs: 120000 });
+  }
+  if (r.code !== 0) throw new Error(cleanError(r.err));
+  const info = JSON.parse(r.out);
+  const entries = (info.entries || []).filter((e) => e && e.id && e.id.length === 11).map((e) => ({
+    id: e.id,
+    title: e.title || e.id,
+    duration: e.duration || 0,
+    unavailable: /^\[(Private|Deleted) video\]$/.test(e.title || ''),
+  }));
+  return {
+    id: info.id,
+    url: target,
+    title: (info.title || 'Плейлист').replace(/ - Videos$/, ''),
+    channel: info.channel || info.uploader || '',
+    isChannel: /\/videos$/.test(target),
+    entries,
+  };
 }
 
 // Remove leftovers (.part, .ytdl, unmerged pieces) of a cancelled download.
@@ -406,11 +621,13 @@ async function handle(msg) {
       return send({ id: msg.id, ok: true, version: VERSION, ytdlp: await ytdlpVersion(), defaultDir: CONFIG.defaultDir, cookies: !!CONFIG.firefoxProfile });
     case 'probe':
       return send({ id: msg.id, ok: true, info: await probe(msg.url) });
+    case 'probeList':
+      return send({ id: msg.id, ok: true, list: await probeList(msg.url) });
     case 'download':
-      return startDownload(msg, false);
+      return dispatchDownload(msg);
     case 'cancel': {
       const job = jobs.get(msg.job);
-      if (job) { job.st.cancelled = true; killTree(job.proc); }
+      if (job) { job.st.cancelled = true; if (job.abort) job.abort.abort(); killTree(job.proc); }
       return send({ id: msg.id, ok: true });
     }
     case 'pickFolder':

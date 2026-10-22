@@ -10,24 +10,52 @@
   const client = YTD.createClient();
   const $ = (id) => document.getElementById(id);
 
-  // current tab: show the video panel if it is a YouTube video
-  const [tab] = await (globalThis.browser || chrome).tabs.query({ active: true, currentWindow: true });
+  const api = globalThis.browser || chrome;
+
+  // current tab: a video gets the video panel (with a playlist tab when opened from one),
+  // a playlist or channel page gets the playlist picker
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   const videoId = tab && tab.url ? YTD.videoIdOf(tab.url) : null;
+  const listUrl = tab && tab.url ? YTD.listUrlOf(tab.url) : null;
   if (videoId) {
-    YTD.mountVideo($('video'), client, { url: 'https://www.youtube.com/watch?v=' + videoId, videoId });
+    YTD.mountVideo($('video'), client, {
+      url: 'https://www.youtube.com/watch?v=' + videoId,
+      videoId,
+      listUrl: listUrl && new URL(tab.url).searchParams.get('list') ? listUrl : null,
+      // the player lives in the page: ask the content script
+      getTime: () => api.tabs.sendMessage(tab.id, { type: 'ytd-time' }),
+    });
+  } else if (listUrl) {
+    YTD.mountList($('list'), client, { url: listUrl });
   } else {
     $('novideo').hidden = false;
+  }
+
+  $('quick').addEventListener('change', (e) => client.call('setSetting', { key: 'quick', value: e.target.value }));
+  $('keys').addEventListener('click', () => {
+    // Edge/Chrome have a shortcuts page; Firefox manages them in about:addons
+    const firefox = typeof browser !== 'undefined' && /Firefox/.test(navigator.userAgent);
+    const url = firefox ? 'about:addons' : (/Edg\//.test(navigator.userAgent) ? 'edge://extensions/shortcuts' : 'chrome://extensions/shortcuts');
+    api.tabs.create({ url }).catch(() => {});
+  });
+  if (api.commands && api.commands.getAll) {
+    api.commands.getAll().then((cmds) => {
+      const c = cmds.find((x) => x.name === 'quick-download');
+      $('keys').textContent = c && c.shortcut ? c.shortcut.replace(/\s/g, '') : 'клавиша не задана';
+    }).catch(() => {});
   }
 
   const renderJobs = YTD.mountJobs($('jobs'), client, {
     filter: () => true,
     showTitle: true,
+    groups: true,
     empty: 'Пока ничего не скачано',
   });
 
   let updating = false;
   client.onState((st) => {
     renderJobs(st);
+    if (document.activeElement !== $('quick')) $('quick').value = st.settings.quick || '';
     $('clear').hidden = !st.jobs.some((j) => j.status !== 'running' && j.status !== 'queued');
     const dir = st.settings.dir || st.host.defaultDir;
     $('dir').textContent = YTD.shortPath(dir) || '—';
