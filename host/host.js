@@ -41,7 +41,8 @@ process.stdin.on('data', (chunk) => {
 // Browser closed the port: stop everything we started.
 process.stdin.on('end', () => {
   for (const job of jobs.values()) killTree(job.proc);
-  process.exit(0);
+  // Exiting synchronously right after a fetch() trips a libuv assertion on Windows; let handles settle.
+  setTimeout(() => process.exit(0), 100);
 });
 
 // ---------- yt-dlp ----------
