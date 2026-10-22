@@ -1,0 +1,39 @@
+html, body { margin: 0; padding: 0; }
+body { width: 380px; background: #fff; }
+@media (prefers-color-scheme: dark) { body { background: #212121; } }
+
+#app { min-height: 120px; }
+#video:empty { display: none; }
+
+.hero { display: flex; gap: 12px; align-items: flex-start; padding: 16px 14px 10px; }
+.logo {
+  width: 40px; height: 40px; border-radius: 12px; flex: none; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-fg);
+}
+.logo svg { width: 22px; height: 22px; }
+.hero .h { font-size: 14px; font-weight: 500; }
+.hero .p { color: var(--fg2); margin-top: 3px; }
+
+.list { padding: 6px 8px 0; }
+#video:not(:empty) ~ .list { border-top: 1px solid var(--line); margin-top: 8px; }
+.lh { display: flex; align-items: center; justify-content: space-between; padding: 8px 6px 4px; }
+.lh span { font-size: 12px; font-weight: 500; color: var(--fg2); text-transform: uppercase; letter-spacing: .5px; }
+.lh .link { margin: 0; font-size: 12px; }
+#jobs { max-height: 250px; overflow-y: auto; scrollbar-width: thin; }
+
+/* the video panel brings its own footer; in the popup the settings block replaces it */
+#video .foot { display: none; }
+#video .jobs.mine { display: none; }
+
+.settings { margin-top: 6px; padding: 8px 14px 12px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.settings .row { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.settings .k { color: var(--fg3); width: 44px; flex: none; }
+.settings .v { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg2); }
+.settings .v.dir { direction: rtl; text-align: left; }
+.settings .link { margin: 0; font-size: 12px; flex: none; }
+.settings .link.hot {
+  color: var(--accent-fg) !important; background: var(--accent); border-radius: 12px; padding: 3px 10px;
+}
+.settings .link.hot:hover { text-decoration: none; filter: brightness(1.08); }
+.settings #extrow.has .v { color: var(--fg); font-weight: 500; }
+.settings .link:disabled { color: var(--fg3) !important; cursor: default; text-decoration: none; }

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>YT Download</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="ytd" id="app">
+    <section id="video"></section>
+
+    <section id="novideo" hidden>
+      <div class="hero">
+        <div class="logo"><svg viewBox="0 0 24 24"><path d="M12 4.5v10.2m0 0-4.2-4.2M12 14.7l4.2-4.2M5.5 19h13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div>
+          <div class="h">Открой видео на YouTube</div>
+          <div class="p">Под плеером появится кнопка «Скачать», или нажми на значок расширения на странице видео.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="list">
+      <div class="lh">
+        <span>Загрузки</span>
+        <button class="link" id="clear" hidden>Очистить</button>
+      </div>
+      <div class="jobs" id="jobs"></div>
+    </section>
+
+    <section class="settings">
+      <div class="row">
+        <span class="k">Папка</span>
+        <span class="v dir" id="dir"></span>
+        <button class="link" id="pick">Изменить</button>
+        <button class="link" id="reset" hidden title="Вернуть Загрузки\YouTube">Сбросить</button>
+      </div>
+      <div class="row">
+        <span class="k">yt-dlp</span>
+        <span class="v" id="ver">…</span>
+        <button class="link" id="update">Обновить</button>
+      </div>
+      <div class="row" id="extrow">
+        <span class="k">Версия</span>
+        <span class="v" id="extver"></span>
+        <button class="link" id="extcheck">Проверить</button>
+        <button class="link hot" id="extapply" hidden></button>
+      </div>
+    </section>
+  </div>
+  <script src="ui.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

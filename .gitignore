@@ -1,0 +1,9 @@
+# generated per machine by install.ps1
+host/config.json
+host/host.bat
+host/yt_download_host.json
+host/yt_download_host.chromium.json
+host/host.log
+# private key for packing a .crx; the public half is "key" in manifest.json
+extension-key.pem
+*.zip

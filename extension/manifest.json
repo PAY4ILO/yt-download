@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "YT Download",
+  "version": "1.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1hu3FgYxXcHyqJnphwXtl18DYvsEsyGLM0IjfwVcWkxUZkjTmXk8hZDpvt1slu22rocqo5qfsQpzDjJESSlOBxL/ijjvx1ro1yY9xNuPX7zAJbCQSlpgXL3fRi7CEmB/duOdkN4Cqq8jpsccT0J2cdsusR0A05tMagzeR4mKmqYT9MVNd1WwvdfXIr+jq4XqMBm9I2xgEqFI7r0APucmhDnSHSuf8PIxy5QsNU4MpxssJUCbqhSDSu9m5Uxji6ewHqD4L0+Ympel5SElAtbFb2HVtwDvLFqE3WzfwR5tf6Tw2ZvHt8pPIuwgy7n1nlupNSKnuR3rOK8nXr2qQTzQkwIDAQAB",
+  "description": "Скачивание видео и звука с YouTube через yt-dlp: кнопка «Скачать» под плеером, выбор качества до 4K/8K, MP3 и M4A.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "yt-download@payk",
+      "strict_min_version": "128.0"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "96": "icons/icon96.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["nativeMessaging", "storage", "notifications"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/*", "*://m.youtube.com/*"],
+      "js": ["ui.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["ui.css"],
+      "matches": ["*://*.youtube.com/*"]
+    }
+  ],
+  "action": {
+    "default_title": "YT Download",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  }
+}
